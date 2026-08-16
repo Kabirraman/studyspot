@@ -1,0 +1,145 @@
+// Campus Study Spot Finder — Prisma schema
+// Postgres. Run `npm run db:push` after setting DATABASE_URL in .env
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum NoiseLevel {
+  SILENT
+  QUIET
+  MODERATE
+  LOUD
+}
+
+enum WifiQuality {
+  POOR
+  OKAY
+  GOOD
+  EXCELLENT
+}
+
+enum Busyness {
+  EMPTY
+  LIGHT
+  MODERATE
+  PACKED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+  ratings  Rating[]
+  photos   Photo[]
+}
+
+// --- NextAuth required models (Prisma adapter) ---
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Building {
+  id        String   @id @default(cuid())
+  name      String   @unique          // e.g. "CS Building", "Central Library"
+  latitude  Float
+  longitude Float
+  spots     Spot[]
+}
+
+model Spot {
+  id            String   @id @default(cuid())
+  name          String                       // "3rd Floor Reading Room"
+  description   String?
+  latitude      Float
+  longitude     Float
+  hasOutlets    Boolean  @default(false)
+  capacity      Int?
+  buildingId    String
+  building      Building @relation(fields: [buildingId], references: [id])
+  googlePlaceId String?  @unique             // set when imported from Google Places; null for manually-added spots
+  createdAt     DateTime @default(now())
+
+  ratings Rating[]
+  photos  Photo[]
+
+  @@index([buildingId])
+}
+
+// One row per rating submission. Free-text `comment` is what the search
+// agent retrieves over (RAG-ish step) — numeric fields alone can't capture
+// "usually empty after 6pm" type nuance.
+model Rating {
+  id         String      @id @default(cuid())
+  spotId     String
+  userId     String
+  noise      NoiseLevel
+  wifi       WifiQuality
+  busyness   Busyness
+  hasOutlets Boolean?               // user-confirmed override of spot default
+  comment    String?     @db.Text
+  timeOfDay  String?                // "morning" | "afternoon" | "evening" | "night" — cheap bucket for the agent to filter on
+  createdAt  DateTime    @default(now())
+
+  spot Spot @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([spotId, createdAt])
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  spotId    String
+  userId    String
+  url       String                     // stored in S3/Cloudinary/UploadThing — never store binary in Postgres
+  caption   String?
+  createdAt DateTime @default(now())
+
+  spot Spot @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([spotId])
+}

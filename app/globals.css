@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #7dd3a8; /* signature: a quiet, focused green — "green light to study" */
+  --surface: #16161a;
+  --surface-raised: #1f1f24;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection {
+  background: var(--accent);
+  color: #0a0a0c;
+}
