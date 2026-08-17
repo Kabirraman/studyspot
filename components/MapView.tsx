@@ -68,7 +68,11 @@ export default function MapView({ spots, onSelectSpot, center }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-render markers whenever the spot list changes.
+  // Re-render markers whenever the spot list changes, and fit the map
+  // to show all of them — without this, spots added after the initial
+  // load (e.g. imported real places) get a real marker but can sit
+  // outside the visible area forever, since the map only centered once
+  // at mount on whatever spots existed then.
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -90,6 +94,17 @@ export default function MapView({ spots, onSelectSpot, center }: Props) {
       marker.addListener("click", () => onSelectSpot?.(spot.id));
       return marker;
     });
+
+    if (spots.length === 1) {
+      // fitBounds on a single point zooms in absurdly far — pin a
+      // sensible fixed zoom instead.
+      mapRef.current.setCenter({ lat: spots[0].latitude, lng: spots[0].longitude });
+      mapRef.current.setZoom(16);
+    } else if (spots.length > 1) {
+      const bounds = new google.maps.LatLngBounds();
+      spots.forEach((s) => bounds.extend({ lat: s.latitude, lng: s.longitude }));
+      mapRef.current.fitBounds(bounds, 48 /* px padding */);
+    }
   }, [spots, onSelectSpot]);
 
   // Re-center when a new focus point is passed in (e.g. after a search).

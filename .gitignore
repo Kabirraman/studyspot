@@ -1,36 +1,39 @@
-# dependencies
+# --- dependencies ---
 node_modules/
 
-# Next.js
+# --- Next.js build output ---
 .next/
 out/
-
-# production
 build/
 
-# environment variables
+# --- env files (never commit real keys) ---
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+# .env.example IS committed on purpose — it's the template with no real values
 
-# logs
+# --- Prisma ---
+# generated client — regenerated automatically by `prisma generate` / postinstall,
+# never edited by hand, and can get large
+node_modules/.prisma/
+
+# --- TypeScript ---
+*.tsbuildinfo
+next-env.d.ts
+
+# --- logs ---
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
+*.log
 
-# OS files
+# --- OS/editor cruft ---
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 
-# Vercel
-.vercel/
-
-# TypeScript
-*.tsbuildinfo
-
-# Prisma
-prisma/*.db
-prisma/*.db-journal
+# --- misc Next.js ---
+.vercel

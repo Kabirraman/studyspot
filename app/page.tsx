@@ -10,7 +10,8 @@ import PlaceImportSearch from "@/components/PlaceImportSearch";
 
 type ApiResult =
   | { status: "needs_clarification"; question: string }
-  | { status: "ok"; results: any[] };
+  | { status: "ok"; results: any[] }
+  | { status: "error"; message: string };
 
 export default function HomePage() {
   const router = useRouter();
@@ -32,15 +33,29 @@ export default function HomePage() {
   async function handleSearch(query: string) {
     setIsLoading(true);
     setSearchResult(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000); // fail fast rather than hang
     try {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (!res.ok || data?.status === undefined) {
+        setSearchResult({ status: "error", message: data?.error ?? "Search failed. Please try again." });
+        return;
+      }
       setSearchResult(data);
+    } catch (err: any) {
+      const message =
+        err?.name === "AbortError"
+          ? "Search took too long — this can happen if the free-tier Gemini rate limit was hit. Wait a few seconds and try again."
+          : "Couldn't reach the search agent. Check your connection.";
+      setSearchResult({ status: "error", message });
     } finally {
+      clearTimeout(timeout);
       setIsLoading(false);
     }
   }
@@ -76,10 +91,17 @@ export default function HomePage() {
         <PlaceImportSearch
           near={averageCenter(allSpots)}
           onImported={refetchSpots}
+          onSearchStart={() => setSearchResult(null)}
         />
       </div>
 
       <section className="mt-6 space-y-3">
+        {showingSearch && searchResult.status === "error" && (
+          <p className="rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">
+            {searchResult.message}
+          </p>
+        )}
+
         {showingSearch && searchResult.status === "needs_clarification" && (
           <p className="rounded-lg border border-neutral-800 bg-[var(--surface-raised)] p-4 text-sm text-neutral-300">
             {searchResult.question}

@@ -30,13 +30,14 @@ const IntentSchema = z.object({
     .enum(["silent", "quiet", "moderate", "loud", "any"])
     .describe("How quiet the user wants the spot to be"),
   requires_outlets: z
-    .boolean()
-    .nullable()
-    .describe("true if the user explicitly needs power outlets, else null"),
+    .enum(["yes", "no", "unspecified"])
+    .describe("'yes' if the user explicitly needs power outlets, else 'unspecified'"),
   location_hint: z
     .string()
-    .nullable()
-    .describe("Building or area name mentioned by the user, else null"),
+    .describe(
+      "Building or area name mentioned by the user, as plain text. Use an " +
+        "empty string if none was mentioned — never omit this field."
+    ),
   time_context: z
     .enum(["morning", "afternoon", "evening", "night", "any"])
     .describe("Time of day the user cares about, defaults to 'any'"),
@@ -55,13 +56,25 @@ export type SearchIntent = z.infer<typeof IntentSchema>;
 const CONFIDENCE_THRESHOLD = 0.5;
 
 function getModel(temperature = 0) {
-  // Gemini 2.0 Flash has a free tier (Google AI Studio API key, no billing
-  // required) that's more than enough for this project. Swap the model
-  // name here if you get access to a different tier later.
+  // NOTE: gemini-2.0-flash was shut down by Google on June 1, 2026. Using
+  // gemini-3.5-flash (the recommended replacement, still on the free tier
+  // via Google AI Studio). Google's models move fast — if this starts
+  // 404ing again, check https://ai.google.dev/gemini-api/docs/models for
+  // the current stable flash model name.
+  //
+  // maxRetries is capped low deliberately: LangChain's default (6 retries,
+  // exponential backoff) means a rate-limited request can silently hang
+  // for close to a minute before finally failing — worse than just
+  // failing fast and letting the user try again. The free tier is
+  // rate-limited (~15 requests/min for flash models as of writing), so if
+  // you're testing quickly or importing lots of spots right before
+  // searching, you may hit it — spacing out requests a few seconds apart
+  // avoids this.
   return new ChatGoogleGenerativeAI({
-    model: "gemini-2.0-flash",
+    model: "gemini-3.5-flash",
     temperature,
     apiKey: process.env.GOOGLE_API_KEY,
+    maxRetries: 1,
   });
 }
 
@@ -76,8 +89,9 @@ export async function extractIntent(query: string): Promise<SearchIntent> {
       content:
         "You extract structured search filters from a student's natural-language " +
         "request for a campus study spot. Only set fields the user actually implied — " +
-        "default to 'any'/null when unstated. Lower your confidence if the query is " +
-        "vague, ambiguous, or unrelated to study-spot attributes.",
+        "default to 'any'/'unspecified'/empty string when unstated. Lower your " +
+        "confidence if the query is vague, ambiguous, or unrelated to study-spot " +
+        "attributes.",
     },
     { role: "user", content: query },
   ]);
@@ -88,30 +102,48 @@ export async function extractIntent(query: string): Promise<SearchIntent> {
 const noiseRank = ["SILENT", "QUIET", "MODERATE", "LOUD"] as const;
 const busynessRank = ["EMPTY", "LIGHT", "MODERATE", "PACKED"] as const;
 
-export async function queryCandidates(intent: SearchIntent, limit = 8) {
+export async function queryCandidates(intent: SearchIntent, limit = 6) {
   const where: Prisma.SpotWhereInput = {};
 
-  if (intent.requires_outlets) {
+  if (intent.requires_outlets === "yes") {
     where.hasOutlets = true;
   }
 
-  if (intent.location_hint) {
-    where.building = {
-      name: { contains: intent.location_hint, mode: "insensitive" },
-    };
+  const hint = intent.location_hint.trim();
+  if (hint.length > 0) {
+    where.OR = [
+      { building: { name: { contains: hint, mode: "insensitive" } } },
+      { description: { contains: hint, mode: "insensitive" } },
+      { name: { contains: hint, mode: "insensitive" } },
+    ];
   }
 
-  const spots = await db.spot.findMany({
+  let spots = await db.spot.findMany({
     where,
     include: {
       building: true,
       ratings: {
         orderBy: { createdAt: "desc" },
-        take: 5, // most recent reviews only — cheap recency signal
+        take: 3, // most recent reviews only — cheap recency signal, kept small so the ranking prompt stays fast
       },
     },
     take: limit * 2, // over-fetch, then re-rank down to `limit` below
   });
+
+  // A location hint is a soft signal, not a hard requirement — real place
+  // names/addresses vary too much to reliably match a vague phrase like
+  // "near the station". If it matched nothing, retry without it rather
+  // than returning zero candidates.
+  if (spots.length === 0 && hint.length > 0) {
+    spots = await db.spot.findMany({
+      where: intent.requires_outlets === "yes" ? { hasOutlets: true } : {},
+      include: {
+        building: true,
+        ratings: { orderBy: { createdAt: "desc" }, take: 3 },
+      },
+      take: limit * 2,
+    });
+  }
 
   // Soft-rank by how closely avg noise/busyness matches the requested
   // preference, when one was given. This is a cheap pre-filter before the
@@ -157,8 +189,9 @@ const RankedResultSchema = z.object({
       explanation: z
         .string()
         .describe(
-          "One grounded sentence explaining why this spot fits, based on the " +
-          "review text provided — not a generic restatement of its attributes"
+          "One grounded sentence explaining why this spot fits — based on its " +
+          "reviews if it has any relevant ones, or its name/description if it " +
+          "doesn't. Not a generic restatement of the query."
         ),
     })
   ),
@@ -183,6 +216,7 @@ export async function rankWithReviews(
       return (
         `Spot ID: ${spot.id}\n` +
         `Name: ${spot.name} (${spot.building.name})\n` +
+        `Description/address: ${spot.description ?? "(none)"}\n` +
         `Outlets: ${spot.hasOutlets ? "yes" : "no"}\n` +
         `Recent reviews:\n${reviews || "  (none yet)"}`
       );
@@ -193,11 +227,20 @@ export async function rankWithReviews(
     {
       role: "system",
       content:
-        "You judge which study spots genuinely match a student's request, using " +
-        "the recent review text as evidence — not just the structured fields. " +
-        "Time-of-day claims (e.g. 'empty after 6pm') must be supported by a review " +
-        "that actually mentions that time context. Mark a spot irrelevant if reviews " +
-        "contradict the request (e.g. reviews call it loud but user wants quiet).",
+        "You judge which study spots genuinely match a student's request. " +
+        "Use the recent review text as evidence for specific, checkable claims — " +
+        "especially time-of-day claims (e.g. 'empty after 6pm' must be supported " +
+        "by a review that actually mentions that time context), and mark a spot " +
+        "irrelevant if its reviews directly contradict the request (e.g. reviews " +
+        "call it loud but the user wants quiet). " +
+        "IMPORTANT: a spot with no reviews yet is NOT automatically irrelevant — " +
+        "many real, valid spots (freshly imported places especially) simply " +
+        "haven't been rated. For those, judge relevance from its name and " +
+        "description against the query instead (e.g. a spot named 'X Cafe' is a " +
+        "reasonable match for a query about cafes, even with zero reviews). Only " +
+        "withhold a match for lack of reviews when the query itself hinges on a " +
+        "specific claim (like a time-of-day pattern) that only review text could " +
+        "confirm.",
     },
     {
       role: "user",

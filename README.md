@@ -138,6 +138,89 @@ prisma/
   seed.ts
 ```
 
+## Troubleshooting
+
+**Search hangs for 30-60 seconds, then fails** — LangChain retries a
+failed Gemini call up to 6 times by default with exponential backoff, so
+a single rate-limited request can silently hang for close to a minute
+before finally erroring. The free tier is rate-limited (roughly 15
+requests/min for flash models as of writing) — search makes 2 Gemini
+calls per request, so testing quickly or importing a bunch of real
+places right before searching can trip it. Fixed by capping
+`maxRetries: 1` in `getModel()` (fails fast instead of hanging), trimming
+how many candidates/reviews go into the ranking prompt (cheaper calls,
+less likely to hit the limit), and adding a 20-second client-side timeout
+in `app/page.tsx` so the UI never sits stuck indefinitely. If you still
+see this, just wait a few seconds between searches.
+
+**Imported places don't show up on the map, or only 2-3 markers ever
+appear** — the map used to center itself once, at page load, based on
+whatever spots existed at that moment, and never adjusted afterward. A
+newly imported cafe across town got a real marker, it just sat outside
+the visible area forever. `MapView.tsx` now calls `fitBounds()` every
+time the spot list changes, so the view always expands to show
+everything currently on screen.
+
+**A spot you just added doesn't show up in natural-language search
+results (e.g. "a cafe" finds nothing even though you added one)** — the
+ranking step (`rankWithReviews` in `lib/agent.ts`) originally leaned on
+review text as its main evidence, which meant a freshly imported spot
+with zero reviews almost always got silently marked irrelevant — even
+when its name obviously matched (e.g. "Atithi Cafe" for a "cafe" query).
+The prompt now explicitly treats a review-less spot as judgeable by name
+and description alone, and only insists on review evidence for claims
+that genuinely need it (like a specific time-of-day pattern).
+
+**A location phrase in the query (e.g. "cafe near the station") returns
+zero results** — `location_hint` was a hard filter against `Building.name`
+only, so anything that wasn't literally named "station" got excluded
+outright. It's now matched more broadly (building name, spot name, or
+description) and falls back to no location filter at all if that broader
+match still comes up empty, rather than returning nothing.
+
+**Search results don't clear when you switch to "Find real places
+nearby"** — the two search boxes (agent search vs. Places import search)
+didn't know about each other. Starting a places search now clears any
+leftover natural-language search results via `onSearchStart` in
+`app/page.tsx`, so you're not looking at two stale result sets at once.
+
+**`The table 'public.Spot' does not exist`** — this project uses `prisma db
+push` (no `prisma/migrations` folder), so `npx prisma migrate reset` has
+nothing to reapply after wiping the database and leaves you with zero
+tables. Use this instead:
+```bash
+npx prisma db push --force-reset
+npm run db:seed
+```
+
+**Search fails with a Gemini 400 error mentioning `"Proto field is not
+repeating, cannot start list"`** — this is a real incompatibility, not a
+transient issue: Gemini's function-calling API doesn't support
+`nullable` fields the way `zod` + LangChain's `withStructuredOutput`
+generates them. `IntentSchema` in `lib/agent.ts` originally used
+`.boolean().nullable()` and `.string().nullable()` for two fields —
+replaced with a `"yes" | "no" | "unspecified"` enum and a plain string
+(empty string = unspecified) respectively, since Gemini has no trouble
+with enums/plain strings, only with nullable unions. If you add more
+fields to that schema later, avoid `.nullable()` — use a sentinel value
+in an enum or an empty string instead.
+
+**Search returns nothing / blank results with no error shown** — Google
+retires Gemini model versions on a rolling schedule (`gemini-2.0-flash`
+was shut down June 1, 2026, for example). If search silently stops
+working, check the server logs for a 404 from the Gemini API, then update
+the model name in `getModel()` in `lib/agent.ts` — see
+[the current model list](https://ai.google.dev/gemini-api/docs/models).
+The frontend (`app/page.tsx`) surfaces agent errors in the UI instead of
+failing silently, so you should see a red error box instead of nothing.
+
+**Duplicate spots after re-running `npm run db:seed`** — the seed script
+now upserts spots by name (no more duplicates going forward), but if you
+already ran it more than once before that fix, the old duplicate rows are
+still in your database. Clean up either with `npx prisma studio` (delete
+the duplicate `Spot` rows by hand) or wipe and reseed with the
+`db push --force-reset` command above.
+
 ## Still open
 
 - **Custom sign-in page**: NextAuth's default screen works but doesn't

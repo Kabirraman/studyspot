@@ -18,9 +18,13 @@ type Props = {
   /** Bias search results toward this location — pass the campus/area center. */
   near?: { lat: number; lng: number };
   onImported?: () => void;
+  /** Called right as a places search starts — lets the parent clear any
+   * leftover natural-language search results, so the page doesn't show
+   * two stale result sets at once. */
+  onSearchStart?: () => void;
 };
 
-export default function PlaceImportSearch({ near, onImported }: Props) {
+export default function PlaceImportSearch({ near, onImported, onSearchStart }: Props) {
   const { data: session } = useSession();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -31,6 +35,7 @@ export default function PlaceImportSearch({ near, onImported }: Props) {
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
+    onSearchStart?.();
     setStatus("searching");
     try {
       const res = await fetch("/api/places/search", {
@@ -83,7 +88,16 @@ export default function PlaceImportSearch({ near, onImported }: Props) {
       <form onSubmit={handleSearch} className="flex gap-2">
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setQuery(value);
+            if (value.trim().length === 0) {
+              // Clearing the box should collapse old results too — leaving
+              // them stuck on screen after the query is deleted looks like
+              // a stale/broken list.
+              setResults([]);
+            }
+          }}
           placeholder='e.g. "libraries near me" or "cafes in Koramangala"'
           className="flex-1 rounded-lg border border-neutral-800 bg-transparent px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 outline-none focus:border-[var(--accent)]"
         />
