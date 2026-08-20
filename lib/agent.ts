@@ -266,11 +266,10 @@ export type SearchResult =
   | { status: "ok"; intent: SearchIntent; results: Awaited<ReturnType<typeof rankWithReviews>> };
 
 export async function searchSpots(query: string): Promise<SearchResult> {
+  console.time("1-extractIntent");
   const intent = await extractIntent(query);
+  console.timeEnd("1-extractIntent");
 
-  // Conditional branch: low-confidence extraction asks a clarifying
-  // question instead of guessing — this is the one real "branch" in the
-  // chain (see note below on why the rest stays linear).
   if (intent.confidence < CONFIDENCE_THRESHOLD) {
     return {
       status: "needs_clarification",
@@ -281,8 +280,13 @@ export async function searchSpots(query: string): Promise<SearchResult> {
     };
   }
 
+  console.time("2-queryCandidates");
   const candidates = await queryCandidates(intent);
+  console.timeEnd("2-queryCandidates");
+
+  console.time("3-rankWithReviews");
   const results = await rankWithReviews(query, intent, candidates);
+  console.timeEnd("3-rankWithReviews");
 
   return { status: "ok", intent, results };
 }

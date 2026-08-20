@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 // GET /api/spots — list all spots with building info + rating aggregates.
-// This powers the default map view (before any natural-language search).
+// This powers the default map view and the client-side filter panel
+// (before any natural-language search).
+const NOISE_RANK = ["SILENT", "QUIET", "MODERATE", "LOUD"] as const;
+const WIFI_RANK = ["POOR", "OKAY", "GOOD", "EXCELLENT"] as const;
+
 export async function GET() {
   const spots = await db.spot.findMany({
     include: {
@@ -13,6 +17,13 @@ export async function GET() {
 
   const withAverages = spots.map((spot) => {
     const n = spot.ratings.length;
+    const avgNoiseIdx = n
+      ? spot.ratings.reduce((sum, r) => sum + NOISE_RANK.indexOf(r.noise), 0) / n
+      : null;
+    const avgWifiIdx = n
+      ? spot.ratings.reduce((sum, r) => sum + WIFI_RANK.indexOf(r.wifi), 0) / n
+      : null;
+
     return {
       id: spot.id,
       name: spot.name,
@@ -22,6 +33,10 @@ export async function GET() {
       hasOutlets: spot.hasOutlets,
       building: spot.building.name,
       ratingCount: n,
+      // Rounded to the nearest enum value, or null if unrated yet — lets
+      // the filter panel bucket spots without guessing at raw indices.
+      avgNoise: avgNoiseIdx !== null ? NOISE_RANK[Math.round(avgNoiseIdx)] : null,
+      avgWifi: avgWifiIdx !== null ? WIFI_RANK[Math.round(avgWifiIdx)] : null,
     };
   });
 

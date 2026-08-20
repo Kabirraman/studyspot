@@ -116,7 +116,10 @@ export default function MapView({ spots, onSelectSpot, center }: Props) {
 
   if (error) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-xl border border-neutral-800 bg-[var(--surface-raised)] text-sm text-neutral-500">
+      <div
+        className="flex h-64 items-center justify-center rounded-2xl border text-sm"
+        style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }}
+      >
         {error}
       </div>
     );
@@ -125,7 +128,8 @@ export default function MapView({ spots, onSelectSpot, center }: Props) {
   return (
     <div
       ref={mapDivRef}
-      className="h-64 w-full overflow-hidden rounded-xl border border-neutral-800 sm:h-80"
+      className="h-64 w-full overflow-hidden rounded-2xl border shadow-xl sm:h-80"
+      style={{ borderColor: "var(--border-subtle)" }}
     />
   );
 }

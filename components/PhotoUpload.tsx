@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
+import { motion } from "framer-motion";
 
 type Props = {
   spotId: string;
@@ -66,7 +67,8 @@ export default function PhotoUpload({ spotId, onUploaded }: Props) {
     return (
       <button
         onClick={() => signIn("google")}
-        className="text-xs text-neutral-500 underline hover:text-neutral-300"
+        className="focus-ring text-xs underline"
+        style={{ color: "var(--text-tertiary)" }}
       >
         Sign in to add a photo
       </button>
@@ -85,14 +87,16 @@ export default function PhotoUpload({ spotId, onUploaded }: Props) {
           if (file) handleFile(file);
         }}
       />
-      <button
+      <motion.button
+        whileTap={{ scale: 0.97 }}
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={status === "uploading"}
-        className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-700 disabled:opacity-50"
+        className="focus-ring rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
+        style={{ borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }}
       >
         {status === "uploading" ? "Uploading…" : "Add a photo"}
-      </button>
+      </motion.button>
 
       {status === "error" && (
         <p className="mt-2 text-xs text-red-400">
@@ -101,7 +105,7 @@ export default function PhotoUpload({ spotId, onUploaded }: Props) {
       )}
 
       {preview && status === "uploading" && (
-        <img src={preview} alt="Uploading preview" className="mt-2 h-20 w-20 rounded-lg object-cover opacity-60" />
+        <img src={preview} alt="Uploading preview" className="mt-2 h-20 w-20 animate-pulse rounded-lg object-cover" />
       )}
     </div>
   );

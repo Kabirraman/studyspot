@@ -3,16 +3,60 @@
 @tailwind utilities;
 
 :root {
-  --accent: #7dd3a8; /* signature: a quiet, focused green — "green light to study" */
-  --surface: #16161a;
-  --surface-raised: #1f1f24;
+  /* Signature accent — a quiet, focused green ("green light to study") */
+  --accent: #7dd3a8;
+  --accent-dim: #7dd3a833;
+  --surface: #0d0d10;
+  --surface-raised: #17171c;
+  --surface-hover: #1e1e24;
+  --border-subtle: #26262e;
+  --border-strong: #34343e;
+  --text-primary: #f4f4f5;
+  --text-secondary: #9a9aa5;
+  --text-tertiary: #626270;
+}
+
+* {
+  border-color: var(--border-subtle);
 }
 
 body {
   font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
   background: var(--accent);
   color: #0a0a0c;
+}
+
+/* Subtle scrollbar to match the dark theme instead of the OS default */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+}
+
+/* Reusable focus ring, consistent across every interactive element */
+.focus-ring {
+  outline: none;
+  transition: box-shadow 150ms ease;
+}
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+/* Soft ambient glow behind the hero — pure CSS, no extra assets */
+.ambient-glow {
+  background: radial-gradient(
+    600px circle at 20% 0%,
+    var(--accent-dim),
+    transparent 60%
+  );
 }

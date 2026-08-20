@@ -1,33 +1,73 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { AnimatePresence, motion } from "framer-motion";
 import SearchBar from "@/components/SearchBar";
 import SpotCard from "@/components/SpotCard";
 import MapView from "@/components/MapView";
 import AuthButton from "@/components/AuthButton";
 import PlaceImportSearch from "@/components/PlaceImportSearch";
+import FilterPanel, { DEFAULT_FILTERS, type Filters } from "@/components/FilterPanel";
 
 type ApiResult =
   | { status: "needs_clarification"; question: string }
   | { status: "ok"; results: any[] }
   | { status: "error"; message: string };
 
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export default function HomePage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [allSpots, setAllSpots] = useState<any[]>([]);
+  const [spotsLoaded, setSpotsLoaded] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [searchResult, setSearchResult] = useState<ApiResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
   useEffect(() => {
     refetchSpots();
   }, []);
 
+  useEffect(() => {
+    if (!session?.user) {
+      setFavoriteIds(new Set());
+      return;
+    }
+    fetch("/api/favorites")
+      .then((r) => r.json())
+      .then((ids: string[]) => setFavoriteIds(new Set(ids)))
+      .catch(() => setFavoriteIds(new Set()));
+  }, [session?.user]);
+
   function refetchSpots() {
     fetch("/api/spots")
       .then((r) => r.json())
-      .then(setAllSpots)
-      .catch(() => setAllSpots([]));
+      .then((data) => {
+        setAllSpots(data);
+        setSpotsLoaded(true);
+      })
+      .catch(() => setSpotsLoaded(true));
+  }
+
+  function handleToggleFavorite(spotId: string, favorited: boolean) {
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (favorited) next.add(spotId);
+      else next.delete(spotId);
+      return next;
+    });
   }
 
   async function handleSearch(query: string) {
@@ -61,86 +101,163 @@ export default function HomePage() {
   }
 
   const showingSearch = searchResult !== null;
-  const mapSpots =
-    showingSearch && searchResult.status === "ok" ? searchResult.results : allSpots;
+
+  const campusCenter = useMemo(() => {
+    if (allSpots.length === 0) return null;
+    const lat = allSpots.reduce((s, p) => s + p.latitude, 0) / allSpots.length;
+    const lng = allSpots.reduce((s, p) => s + p.longitude, 0) / allSpots.length;
+    return { lat, lng };
+  }, [allSpots]);
+
+  const filteredSpots = useMemo(() => {
+    return allSpots.filter((spot) => {
+      if (filters.outletsOnly && !spot.hasOutlets) return false;
+      if (filters.noise !== "any" && spot.avgNoise !== filters.noise) return false;
+      if (filters.wifi !== "any" && spot.avgWifi !== filters.wifi) return false;
+      if (filters.favoritesOnly && !favoriteIds.has(spot.id)) return false;
+      if (filters.maxDistanceKm !== null && campusCenter) {
+        const d = haversineKm(campusCenter.lat, campusCenter.lng, spot.latitude, spot.longitude);
+        if (d > filters.maxDistanceKm) return false;
+      }
+      return true;
+    });
+  }, [allSpots, filters, favoriteIds, campusCenter]);
+
+  const mapSpots = showingSearch && searchResult.status === "ok" ? searchResult.results : filteredSpots;
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-12">
-      <header className="mb-8 flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-[var(--accent)]">
-            Campus Study Spot Finder
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-neutral-50">
-            Find somewhere good to work.
-          </h1>
-        </div>
-        <AuthButton />
-      </header>
+    <main className="relative min-h-screen">
+      <div className="ambient-glow pointer-events-none absolute inset-x-0 top-0 h-[420px]" />
 
-      <SearchBar onSearch={handleSearch} isLoading={isLoading} />
-
-      <div className="mt-6">
-        <MapView
-          spots={mapSpots}
-          onSelectSpot={(id) => router.push(`/spot/${id}`)}
-        />
-      </div>
-
-      <div className="mt-6">
-        <PlaceImportSearch
-          near={averageCenter(allSpots)}
-          onImported={refetchSpots}
-          onSearchStart={() => setSearchResult(null)}
-        />
-      </div>
-
-      <section className="mt-6 space-y-3">
-        {showingSearch && searchResult.status === "error" && (
-          <p className="rounded-lg border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">
-            {searchResult.message}
-          </p>
-        )}
-
-        {showingSearch && searchResult.status === "needs_clarification" && (
-          <p className="rounded-lg border border-neutral-800 bg-[var(--surface-raised)] p-4 text-sm text-neutral-300">
-            {searchResult.question}
-          </p>
-        )}
-
-        {showingSearch && searchResult.status === "ok" && searchResult.results.length === 0 && (
-          <p className="text-sm text-neutral-500">
-            No spots matched that. Try loosening a constraint.
-          </p>
-        )}
-
-        {showingSearch && searchResult.status === "ok" && searchResult.results.length > 0 && (
-          <>
-            <p className="text-xs text-neutral-500">
-              {searchResult.results.length} spot{searchResult.results.length === 1 ? "" : "s"} matched
+      <div className="relative mx-auto max-w-2xl px-4 py-10 sm:py-14">
+        <motion.header
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="mb-8 flex items-start justify-between gap-4"
+        >
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest" style={{ color: "var(--accent)" }}>
+              Campus Study Spot Finder
             </p>
-            {searchResult.results.map((spot) => (
-              <SpotCard key={spot.id} spot={spot} />
-            ))}
-          </>
-        )}
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl" style={{ color: "var(--text-primary)" }}>
+              Find somewhere good to work.
+            </h1>
+          </div>
+          <AuthButton />
+        </motion.header>
+
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }}>
+          <SearchBar onSearch={handleSearch} onClear={() => setSearchResult(null)} isLoading={isLoading} />
+        </motion.div>
+
+        <motion.div className="mt-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, delay: 0.1 }}>
+          <MapView spots={mapSpots} onSelectSpot={(id) => router.push(`/spot/${id}`)} />
+        </motion.div>
+
+        <motion.div className="mt-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, delay: 0.15 }}>
+          <PlaceImportSearch near={campusCenter ?? undefined} onImported={refetchSpots} onSearchStart={() => setSearchResult(null)} />
+        </motion.div>
 
         {!showingSearch && (
-          <>
-            <p className="text-xs text-neutral-500">All spots</p>
-            {allSpots.map((spot) => (
-              <SpotCard key={spot.id} spot={spot} />
-            ))}
-          </>
+          <div className="mt-6">
+            <FilterPanel filters={filters} onChange={setFilters} hasDistanceData={allSpots.length > 1} />
+          </div>
         )}
-      </section>
+
+        <section className="mt-6 space-y-3">
+          <AnimatePresence mode="wait">
+            {isLoading && (
+              <motion.div key="skeleton" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="h-[72px] animate-pulse rounded-xl border"
+                    style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--border-subtle)" }}
+                  />
+                ))}
+              </motion.div>
+            )}
+
+            {!isLoading && showingSearch && searchResult.status === "error" && (
+              <motion.p
+                key="error"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="rounded-xl border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300"
+              >
+                {searchResult.message}
+              </motion.p>
+            )}
+
+            {!isLoading && showingSearch && searchResult.status === "needs_clarification" && (
+              <motion.p
+                key="clarify"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="rounded-xl border p-4 text-sm"
+                style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }}
+              >
+                {searchResult.question}
+              </motion.p>
+            )}
+
+            {!isLoading && showingSearch && searchResult.status === "ok" && searchResult.results.length === 0 && (
+              <motion.p key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                No spots matched that. Try loosening a constraint.
+              </motion.p>
+            )}
+
+            {!isLoading && showingSearch && searchResult.status === "ok" && searchResult.results.length > 0 && (
+              <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                  {searchResult.results.length} spot{searchResult.results.length === 1 ? "" : "s"} matched
+                </p>
+                {searchResult.results.map((spot, i) => (
+                  <motion.div key={spot.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
+                    <SpotCard spot={spot} isFavorited={favoriteIds.has(spot.id)} onToggleFavorite={handleToggleFavorite} />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+
+            {!isLoading && !showingSearch && (
+              <motion.div key="all" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                  {filteredSpots.length === allSpots.length
+                    ? "All spots"
+                    : `${filteredSpots.length} of ${allSpots.length} spots`}
+                </p>
+                {!spotsLoaded &&
+                  [0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-[72px] animate-pulse rounded-xl border"
+                      style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--border-subtle)" }}
+                    />
+                  ))}
+                {spotsLoaded && allSpots.length === 0 && (
+                  <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    No spots yet — search for real places nearby to add the first one.
+                  </p>
+                )}
+                {spotsLoaded && allSpots.length > 0 && filteredSpots.length === 0 && (
+                  <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                    No spots match these filters.
+                  </p>
+                )}
+                {filteredSpots.map((spot, i) => (
+                  <motion.div key={spot.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 8) * 0.03 }}>
+                    <SpotCard spot={spot} isFavorited={favoriteIds.has(spot.id)} onToggleFavorite={handleToggleFavorite} />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+      </div>
     </main>
   );
-}
-
-function averageCenter(spots: any[]): { lat: number; lng: number } | undefined {
-  if (spots.length === 0) return undefined;
-  const lat = spots.reduce((s, p) => s + p.latitude, 0) / spots.length;
-  const lng = spots.reduce((s, p) => s + p.longitude, 0) / spots.length;
-  return { lat, lng };
 }

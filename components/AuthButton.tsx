@@ -1,32 +1,44 @@
 "use client";
 
 import { useSession, signIn, signOut } from "next-auth/react";
+import { motion } from "framer-motion";
 
 export default function AuthButton() {
   const { data: session, status } = useSession();
 
   if (status === "loading") {
-    return <div className="h-8 w-20 animate-pulse rounded-lg bg-neutral-800" />;
+    return <div className="h-9 w-24 animate-pulse rounded-full" style={{ backgroundColor: "var(--surface-hover)" }} />;
   }
 
   if (session?.user) {
+    const initial = (session.user.name ?? session.user.email ?? "?").charAt(0).toUpperCase();
     return (
-      <button
+      <motion.button
+        whileTap={{ scale: 0.97 }}
         onClick={() => signOut()}
-        className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 hover:border-neutral-700 hover:text-neutral-200"
+        className="focus-ring flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-xs transition-colors"
+        style={{ borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }}
       >
-        {session.user.name ?? session.user.email}
-        <span className="text-neutral-600">· Sign out</span>
-      </button>
+        <span
+          className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-neutral-950"
+          style={{ backgroundColor: "var(--accent)" }}
+        >
+          {initial}
+        </span>
+        <span className="max-w-[100px] truncate">{session.user.name ?? session.user.email}</span>
+        <span style={{ color: "var(--text-tertiary)" }}>Sign out</span>
+      </motion.button>
     );
   }
 
   return (
-    <button
+    <motion.button
+      whileTap={{ scale: 0.97 }}
       onClick={() => signIn("google")}
-      className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-neutral-950"
+      className="focus-ring rounded-full px-4 py-2 text-xs font-medium text-neutral-950"
+      style={{ backgroundColor: "var(--accent)" }}
     >
       Sign in
-    </button>
+    </motion.button>
   );
 }

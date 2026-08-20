@@ -120,13 +120,17 @@ app/
   api/spots/[id]/photos/      — record an uploaded photo (session-authenticated)
   api/places/search/          — search real places via Google Places
   api/places/import/          — import a Google place as a trackable Spot
+  api/favorites/               — list current user's favorited spot ids
+  api/spots/[id]/favorite/     — toggle favorite status for a spot
 components/
   SearchBar.tsx
-  SpotCard.tsx                — links to the detail page
-  MapView.tsx                 — Google Maps markers, dark theme
+  SpotCard.tsx                — links to the detail page, favorite heart
+  MapView.tsx                 — Google Maps markers, dark theme, auto-fits bounds
   RatingForm.tsx
   PhotoUpload.tsx
   PlaceImportSearch.tsx        — find + import real places
+  FilterPanel.tsx              — noise/wifi/outlets/favorites/distance filters
+  FavoriteButton.tsx           — heart toggle, used in SpotCard + detail page
   AuthButton.tsx               — sign in/out
 lib/
   agent.ts                    — the search agent (start here)
@@ -138,7 +142,51 @@ prisma/
   seed.ts
 ```
 
+## Favorites
+
+Signed-in users can bookmark spots (heart icon on every card and on the
+detail page). `Favorite` is a simple `(userId, spotId)` unique join table
+— `/api/favorites` lists the current user's favorited spot ids,
+`/api/spots/:id/favorite` toggles one. The "Favorites only" filter on the
+home page uses the same data.
+
+## Filters
+
+The default "All spots" list (not search results — the agent already does
+its own relevance filtering) has a filter panel: noise level, Wi-Fi
+quality, outlets-only, favorites-only, and distance from the average
+spot location ("campus center"). Noise/Wi-Fi filtering compares against
+`avgNoise`/`avgWifi` — computed server-side in `/api/spots` by averaging
+each spot's ratings and rounding to the nearest enum value; spots with no
+ratings yet have `null` for both and won't match a specific noise/Wi-Fi
+filter (they'll still show under "any").
+
+## Deploying
+
+This is a standard Next.js 14 App Router project, so [Vercel](https://vercel.com)
+is the path of least resistance:
+
+1. Push this repo to GitHub.
+2. Import it in Vercel — it auto-detects Next.js, no config needed.
+3. Add every variable from `.env.example` in Vercel's Project Settings →
+   Environment Variables, with real values (same as local, but:
+   - `NEXTAUTH_URL` → your real deployed URL, e.g. `https://yourapp.vercel.app`
+   - Add that same URL's `/api/auth/callback/google` as an additional
+     Authorized redirect URI in Google Cloud Console — Google needs both
+     the localhost and production URLs registered.
+4. Vercel builds and deploys automatically on push. First deploy will
+   fail if you forget `npm run db:push` against your **production**
+   database first — the schema has to exist there too, it's separate
+   from your local dev database unless you point both at the same one.
+
+Neon and Supabase (whichever you're using for `DATABASE_URL`) don't need
+any extra deployment step — they're already hosted.
+
 ## Troubleshooting
+
+**New "Favorite" table doesn't exist / favorites silently fail** — this
+update added a `Favorite` model to the schema. Run `npm run db:push`
+again to sync it before testing favorites.
 
 **Search hangs for 30-60 seconds, then fails** — LangChain retries a
 failed Gemini call up to 6 times by default with exponential backoff, so

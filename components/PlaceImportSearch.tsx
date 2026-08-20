@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
+import { AnimatePresence, motion } from "framer-motion";
 
 type PlaceResult = {
   placeId: string;
@@ -15,12 +16,8 @@ type PlaceResult = {
 };
 
 type Props = {
-  /** Bias search results toward this location — pass the campus/area center. */
   near?: { lat: number; lng: number };
   onImported?: () => void;
-  /** Called right as a places search starts — lets the parent clear any
-   * leftover natural-language search results, so the page doesn't show
-   * two stale result sets at once. */
   onSearchStart?: () => void;
 };
 
@@ -81,33 +78,31 @@ export default function PlaceImportSearch({ near, onImported, onSearchStart }: P
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-[var(--surface-raised)] p-4">
-      <p className="mb-3 text-sm font-medium text-neutral-200">
+    <div className="rounded-2xl border p-4" style={{ backgroundColor: "var(--surface-raised)", borderColor: "var(--border-subtle)" }}>
+      <p className="mb-3 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
         Find real places nearby to add
       </p>
-      <form onSubmit={handleSearch} className="flex gap-2">
+      <form onSubmit={handleSearch} className="flex flex-col gap-2 sm:flex-row">
         <input
           value={query}
           onChange={(e) => {
             const value = e.target.value;
             setQuery(value);
-            if (value.trim().length === 0) {
-              // Clearing the box should collapse old results too — leaving
-              // them stuck on screen after the query is deleted looks like
-              // a stale/broken list.
-              setResults([]);
-            }
+            if (value.trim().length === 0) setResults([]);
           }}
           placeholder='e.g. "libraries near me" or "cafes in Koramangala"'
-          className="flex-1 rounded-lg border border-neutral-800 bg-transparent px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 outline-none focus:border-[var(--accent)]"
+          className="focus-ring flex-1 rounded-lg border bg-transparent px-3 py-2 text-sm placeholder-[var(--text-tertiary)]"
+          style={{ borderColor: "var(--border-subtle)", color: "var(--text-primary)" }}
         />
-        <button
+        <motion.button
           type="submit"
+          whileTap={{ scale: 0.97 }}
           disabled={status === "searching" || !query.trim()}
-          className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-200 disabled:opacity-40"
+          className="focus-ring shrink-0 rounded-lg border px-4 py-2 text-sm disabled:opacity-40"
+          style={{ borderColor: "var(--border-strong)", color: "var(--text-primary)" }}
         >
           {status === "searching" ? "Searching…" : "Search"}
-        </button>
+        </motion.button>
       </form>
 
       {status === "error" && (
@@ -116,43 +111,59 @@ export default function PlaceImportSearch({ near, onImported, onSearchStart }: P
         </p>
       )}
 
-      {results.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {results.map((place) => {
-            const imported = importedIds.has(place.placeId);
-            return (
-              <div
-                key={place.placeId}
-                className="flex items-center gap-3 rounded-lg border border-neutral-800 p-3"
-              >
-                {place.photoUrl && (
-                  <img
-                    src={place.photoUrl}
-                    alt={place.name}
-                    className="h-12 w-12 shrink-0 rounded-md object-cover"
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-neutral-100">{place.name}</p>
-                  <p className="truncate text-xs text-neutral-500">{place.address}</p>
-                  {place.rating != null && (
-                    <p className="text-xs text-neutral-600">
-                      {place.rating}★ on Google ({place.userRatingCount ?? 0} reviews)
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={() => handleImport(place)}
-                  disabled={imported || importingId === place.placeId}
-                  className="shrink-0 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-neutral-950 disabled:opacity-40"
+      <AnimatePresence>
+        {status === "searching" && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-4 space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-[60px] animate-pulse rounded-lg" style={{ backgroundColor: "var(--surface-hover)" }} />
+            ))}
+          </motion.div>
+        )}
+
+        {status !== "searching" && results.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-4 space-y-2">
+            {results.map((place, i) => {
+              const imported = importedIds.has(place.placeId);
+              return (
+                <motion.div
+                  key={place.placeId}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  className="flex items-center gap-3 rounded-lg border p-3"
+                  style={{ borderColor: "var(--border-subtle)" }}
                 >
-                  {imported ? "Added" : importingId === place.placeId ? "Adding…" : "Add as study spot"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                  {place.photoUrl && (
+                    <img src={place.photoUrl} alt={place.name} className="h-12 w-12 shrink-0 rounded-md object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm" style={{ color: "var(--text-primary)" }}>
+                      {place.name}
+                    </p>
+                    <p className="truncate text-xs" style={{ color: "var(--text-secondary)" }}>
+                      {place.address}
+                    </p>
+                    {place.rating != null && (
+                      <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                        {place.rating}★ on Google ({place.userRatingCount ?? 0} reviews)
+                      </p>
+                    )}
+                  </div>
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => handleImport(place)}
+                    disabled={imported || importingId === place.placeId}
+                    className="focus-ring shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-950 disabled:opacity-40"
+                    style={{ backgroundColor: "var(--accent)" }}
+                  >
+                    {imported ? "Added" : importingId === place.placeId ? "Adding…" : "Add as study spot"}
+                  </motion.button>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -39,10 +39,11 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
 
-  accounts Account[]
-  sessions Session[]
-  ratings  Rating[]
-  photos   Photo[]
+  accounts  Account[]
+  sessions  Session[]
+  ratings   Rating[]
+  photos    Photo[]
+  favorites Favorite[]
 }
 
 // --- NextAuth required models (Prisma adapter) ---
@@ -103,10 +104,26 @@ model Spot {
   googlePlaceId String?  @unique             // set when imported from Google Places; null for manually-added spots
   createdAt     DateTime @default(now())
 
-  ratings Rating[]
-  photos  Photo[]
+  ratings   Rating[]
+  photos    Photo[]
+  favorites Favorite[]
 
   @@index([buildingId])
+}
+
+// One row per (user, spot) bookmark. Unique on the pair so toggling is a
+// simple create-or-delete, never a duplicate.
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  spotId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spot Spot @relation(fields: [spotId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, spotId])
+  @@index([userId])
 }
 
 // One row per rating submission. Free-text `comment` is what the search
